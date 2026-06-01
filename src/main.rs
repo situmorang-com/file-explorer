@@ -4950,9 +4950,13 @@ fn short_path(p: &str) -> String {
 }
 
 fn is_image(ext: &str) -> bool {
+    // Formats the `image` crate decodes by default (what gpui::img can render
+    // directly). AVIF and HEIC are *not* here — gpui ships them in its
+    // extension list but the underlying decoder isn't compiled in, so we
+    // route them through qlmanage (see `is_quicklookable`) instead.
     matches!(
         ext,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "heic" | "bmp" | "ico"
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico"
             | "tif" | "tiff" | "tga" | "dds" | "hdr" | "exr" | "qoi" | "svg"
     )
 }
@@ -4980,6 +4984,7 @@ fn is_quicklookable(ext: &str) -> bool {
             | "numbers"
             | "pages"
             | "heic"
+            | "avif"
             | "psd"
     )
 }

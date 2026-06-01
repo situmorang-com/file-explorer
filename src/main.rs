@@ -18,31 +18,70 @@ use nucleo::Matcher;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// Catppuccin Mocha — modern dark palette used across Linear/Raycast-inspired UIs.
-// Colors prefixed with `T_` are translucent (alpha-channel) for vibrancy layers.
+// Theme system: Catppuccin Mocha (dark) + Catppuccin Latte (light), selected
+// at runtime by an atomic flag that mirrors window.appearance(). All callsites
+// go through the accessor functions below.
 mod theme {
     use gpui::{rgb, rgba, Rgba};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static LIGHT: AtomicBool = AtomicBool::new(false);
+
+    pub fn set_light(light: bool) {
+        LIGHT.store(light, Ordering::Relaxed);
+    }
+    pub fn is_light() -> bool {
+        LIGHT.load(Ordering::Relaxed)
+    }
+
+    #[allow(dead_code)]
     pub fn c(v: u32) -> Rgba {
         rgb(v)
     }
-    pub fn t(v: u32) -> Rgba {
-        rgba(v)
+
+    macro_rules! palette {
+        ($($name:ident => $dark:expr, $light:expr;)*) => {
+            $(
+                pub fn $name() -> Rgba {
+                    if is_light() { rgb($light) } else { rgb($dark) }
+                }
+            )*
+        };
     }
-    // Solid (panels that need contrast)
-    pub const TEXT: u32 = 0xcdd6f4;
-    pub const SUBTEXT: u32 = 0xa6adc8;
-    pub const MUTED: u32 = 0x7f849c;
-    pub const ACCENT: u32 = 0x89b4fa;
-    pub const DIR: u32 = 0xf9e2af;
-    pub const ACCENT_BAR: u32 = 0xcba6f7;
-    pub const MATCH: u32 = 0xf5c2e7; // pink for matched chars
-    pub const BORDER: u32 = 0x313244;
-    pub const SEL: u32 = 0x313244;
-    // Translucent (window vibrancy layers; lower 8 bits = alpha 0-255)
-    pub const WINDOW_BG: u32 = 0x11111b40; // ~0.25 alpha — let the desktop through
-    pub const SURFACE: u32 = 0x18182526; // ~0.15
-    pub const SURFACE_ALT: u32 = 0x1e1e2e40; // ~0.25
-    pub const SIDEBAR: u32 = 0x18182559; // ~0.35
+
+    // Solid color tokens
+    palette! {
+        text       => 0xcdd6f4, 0x4c4f69;
+        subtext    => 0xa6adc8, 0x5c5f77;
+        muted      => 0x7f849c, 0x6c6f85;
+        accent     => 0x89b4fa, 0x1e66f5; // blue
+        dir        => 0xf9e2af, 0xdf8e1d; // yellow
+        accent_bar => 0xcba6f7, 0x8839ef; // mauve
+        match_hi   => 0xf5c2e7, 0xea76cb; // pink
+        border     => 0x313244, 0xccd0da;
+        sel        => 0x313244, 0xdce0e8;
+        danger     => 0xf38ba8, 0xd20f39; // red
+        panel      => 0x1e1e2e, 0xeff1f5; // opaque modal / menu bg
+        on_accent  => 0x11111b, 0xeff1f5; // text on accent_bar
+    }
+
+    macro_rules! palette_t {
+        ($($name:ident => $dark:expr, $light:expr;)*) => {
+            $(
+                pub fn $name() -> Rgba {
+                    if is_light() { rgba($light) } else { rgba($dark) }
+                }
+            )*
+        };
+    }
+
+    // Translucent vibrancy layers (lower 8 bits = alpha 0-255).
+    palette_t! {
+        window_bg   => 0x11111b40, 0xeff1f560;
+        surface     => 0x18182526, 0xe6e9ef33;
+        surface_alt => 0x1e1e2e40, 0xe6e9ef66;
+        sidebar     => 0x18182559, 0xe6e9ef99;
+    }
 }
 
 fn file_icon(is_dir: bool, name: &str) -> &'static str {
@@ -1589,7 +1628,7 @@ impl Explorer {
             .map(|(i, e)| {
                 let selected = i == self.selected;
                 let row_bg = if selected {
-                    theme::c(theme::SEL)
+                    theme::sel()
                 } else {
                     rgba(0x00000000)
                 };
@@ -1600,9 +1639,9 @@ impl Explorer {
                     .unwrap_or_else(|| e.display.clone());
                 let icon = file_icon(e.is_dir, &name);
                 let icon_color = if e.is_dir {
-                    theme::c(theme::DIR)
+                    theme::dir()
                 } else {
-                    theme::c(theme::ACCENT)
+                    theme::accent()
                 };
                 let parent_dir = e
                     .display
@@ -1648,9 +1687,9 @@ impl Explorer {
                     })
                     .border_l_2()
                     .border_color(if selected {
-                        theme::c(theme::ACCENT_BAR)
+                        theme::accent_bar()
                     } else if is_marked {
-                        theme::c(theme::MATCH)
+                        theme::match_hi()
                     } else {
                         rgba(0x00000000)
                     })
@@ -1736,17 +1775,17 @@ impl Explorer {
                                 &name,
                                 &name_hi,
                                 if is_dir {
-                                    theme::c(theme::DIR)
+                                    theme::dir()
                                 } else {
-                                    theme::c(theme::TEXT)
+                                    theme::text()
                                 },
-                                theme::c(theme::MATCH),
+                                theme::match_hi(),
                             )),
                     )
                     .child(
                         div()
                             .text_size(px(11.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(SharedString::from(parent_dir)),
                     )
                     .into_any_element()
@@ -1781,7 +1820,7 @@ impl Explorer {
             .map(|(i, m)| {
                 let selected = i == self.selected;
                 let row_bg = if selected {
-                    theme::c(theme::SEL)
+                    theme::sel()
                 } else {
                     rgba(0x00000000)
                 };
@@ -1833,9 +1872,9 @@ impl Explorer {
                     })
                     .border_l_2()
                     .border_color(if selected {
-                        theme::c(theme::ACCENT_BAR)
+                        theme::accent_bar()
                     } else if is_marked {
-                        theme::c(theme::MATCH)
+                        theme::match_hi()
                     } else {
                         rgba(0x00000000)
                     })
@@ -1882,7 +1921,7 @@ impl Explorer {
                             .child(
                                 div()
                                     .w(px(18.0))
-                                    .text_color(theme::c(theme::ACCENT))
+                                    .text_color(theme::accent())
                                     .text_size(px(12.0))
                                     .child(SharedString::from(icon.to_string())),
                             )
@@ -1890,13 +1929,13 @@ impl Explorer {
                                 div()
                                     .flex_grow()
                                     .text_size(px(12.0))
-                                    .text_color(theme::c(theme::TEXT))
+                                    .text_color(theme::text())
                                     .child(SharedString::from(rel)),
                             )
                             .child(
                                 div()
                                     .text_size(px(10.0))
-                                    .text_color(theme::c(theme::MUTED))
+                                    .text_color(theme::muted())
                                     .child(SharedString::from(format!(":{}", m.line))),
                             ),
                     )
@@ -1925,7 +1964,7 @@ impl Explorer {
                                 let abs = (cursor + ci) as u32;
                                 let hit = hi_indices.binary_search(&abs).is_ok();
                                 let color = if hit {
-                                    theme::c(theme::MATCH)
+                                    theme::match_hi()
                                 } else {
                                     base
                                 };
@@ -2041,7 +2080,13 @@ fn highlight(name: &str, indices: &[u32], base: Rgba, hi: Rgba) -> Vec<gpui::Any
 }
 
 impl Render for Explorer {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Mirror macOS system Light/Dark to our palette every frame.
+        theme::set_light(matches!(
+            window.appearance(),
+            gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight
+        ));
+
         // ─── Sidebar (left) ─────────────────────────────────────────────
         let current = self.root.clone();
         let sidebar = div()
@@ -2049,9 +2094,9 @@ impl Render for Explorer {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme::t(theme::SIDEBAR))
+            .bg(theme::sidebar())
             .border_r_1()
-            .border_color(theme::c(theme::BORDER))
+            .border_color(theme::border())
             .pt_8()
             .px_2()
             .gap_0p5()
@@ -2060,7 +2105,7 @@ impl Render for Explorer {
                     .px_2()
                     .pb_2()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("LOCATIONS"),
             )
             .children(pins().into_iter().enumerate().map(|(i, p)| {
@@ -2076,11 +2121,11 @@ impl Render for Explorer {
                     .py_1p5()
                     .rounded_md()
                     .bg(if active {
-                        theme::c(theme::SEL)
+                        theme::sel()
                     } else {
                         rgba(0x00000000)
                     })
-                    .hover(|s| s.bg(theme::c(theme::SEL)))
+                    .hover(|s| s.bg(theme::sel()))
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -2094,20 +2139,20 @@ impl Render for Explorer {
                         div()
                             .w(px(18.0))
                             .text_size(px(13.0))
-                            .text_color(theme::c(theme::ACCENT))
+                            .text_color(theme::accent())
                             .child(SharedString::from(p.icon.to_string())),
                     )
                     .child(
                         div()
                             .flex_grow()
                             .text_size(px(12.0))
-                            .text_color(theme::c(theme::TEXT))
+                            .text_color(theme::text())
                             .child(SharedString::from(p.label.to_string())),
                     )
                     .child(
                         div()
                             .text_size(px(10.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(SharedString::from(format!("⌘{}", i + 1))),
                     )
             }))
@@ -2117,7 +2162,7 @@ impl Render for Explorer {
                     .px_2()
                     .pb_2()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("BOOKMARKS"),
             )
             .children(self.bookmarks.clone().into_iter().enumerate().map(|(i, p)| {
@@ -2137,11 +2182,11 @@ impl Render for Explorer {
                     .py_1()
                     .rounded_md()
                     .bg(if active {
-                        theme::c(theme::SEL)
+                        theme::sel()
                     } else {
                         rgba(0x00000000)
                     })
-                    .hover(|s| s.bg(theme::c(theme::SEL)))
+                    .hover(|s| s.bg(theme::sel()))
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -2155,14 +2200,14 @@ impl Render for Explorer {
                         div()
                             .w(px(18.0))
                             .text_size(px(11.0))
-                            .text_color(theme::c(theme::ACCENT_BAR))
+                            .text_color(theme::accent_bar())
                             .child(""),
                     )
                     .child(
                         div()
                             .flex_grow()
                             .text_size(px(12.0))
-                            .text_color(theme::c(theme::TEXT))
+                            .text_color(theme::text())
                             .child(SharedString::from(display)),
                     )
             }))
@@ -2172,7 +2217,7 @@ impl Render for Explorer {
                     .px_2()
                     .pb_2()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("RECENT"),
             )
             .children(self.recents.clone().into_iter().enumerate().map(|(i, p)| {
@@ -2193,11 +2238,11 @@ impl Render for Explorer {
                     .py_1()
                     .rounded_md()
                     .bg(if active {
-                        theme::c(theme::SEL)
+                        theme::sel()
                     } else {
                         rgba(0x00000000)
                     })
-                    .hover(|s| s.bg(theme::c(theme::SEL)))
+                    .hover(|s| s.bg(theme::sel()))
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -2211,7 +2256,7 @@ impl Render for Explorer {
                         div()
                             .w(px(18.0))
                             .text_size(px(11.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(""),
                     )
                     .child(
@@ -2222,13 +2267,13 @@ impl Render for Explorer {
                             .child(
                                 div()
                                     .text_size(px(11.0))
-                                    .text_color(theme::c(theme::SUBTEXT))
+                                    .text_color(theme::subtext())
                                     .child(SharedString::from(display)),
                             )
                             .child(
                                 div()
                                     .text_size(px(9.0))
-                                    .text_color(theme::c(theme::MUTED))
+                                    .text_color(theme::muted())
                                     .child(SharedString::from(sub)),
                             ),
                     )
@@ -2243,13 +2288,13 @@ impl Render for Explorer {
                 .gap_2()
                 .px_4()
                 .py_2()
-                .bg(theme::t(theme::SURFACE_ALT))
+                .bg(theme::surface_alt())
                 .border_b_1()
-                .border_color(theme::c(theme::ACCENT_BAR))
+                .border_color(theme::accent_bar())
                 .text_size(px(12.0))
                 .child(
                     div()
-                        .text_color(theme::c(theme::ACCENT_BAR))
+                        .text_color(theme::accent_bar())
                         .child("Go to:"),
                 )
                 .child(
@@ -2260,15 +2305,15 @@ impl Render for Explorer {
                             &self.path_input,
                             self.path_cursor,
                             self.path_anchor,
-                            theme::c(theme::TEXT),
-                            theme::c(theme::ACCENT_BAR),
+                            theme::text(),
+                            theme::accent_bar(),
                             self.caret_on,
                         )),
                 )
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .text_color(theme::c(theme::MUTED))
+                        .text_color(theme::muted())
                         .child("↵ go · esc cancel"),
                 )
         } else {
@@ -2284,9 +2329,9 @@ impl Render for Explorer {
                     .py_0p5()
                     .mr_2()
                     .rounded_sm()
-                    .bg(theme::c(theme::SEL))
+                    .bg(theme::sel())
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::DIR))
+                    .text_color(theme::dir())
                     .child("🌿")
                     .child(SharedString::from(b))
                     .into_any_element()
@@ -2298,9 +2343,9 @@ impl Render for Explorer {
                 .gap_1()
                 .px_4()
                 .py_2()
-                .bg(theme::t(theme::SURFACE_ALT))
+                .bg(theme::surface_alt())
                 .border_b_1()
-                .border_color(theme::c(theme::BORDER))
+                .border_color(theme::border())
                 .text_size(px(12.0))
                 .children(branch_chip)
                 .children(segs.into_iter().enumerate().map(|(i, (label, path))| {
@@ -2309,8 +2354,8 @@ impl Render for Explorer {
                             .id(SharedString::from(format!("crumb-{}", i)))
                             .px_1()
                             .rounded_sm()
-                            .text_color(theme::c(theme::SUBTEXT))
-                            .hover(|s| s.bg(rgba(0x31324466)).text_color(theme::c(theme::TEXT)))
+                            .text_color(theme::subtext())
+                            .hover(|s| s.bg(rgba(0x31324466)).text_color(theme::text()))
                             .cursor_pointer()
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -2324,7 +2369,7 @@ impl Render for Explorer {
                         // separator
                         div()
                             .px_0p5()
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(SharedString::from(label))
                             .into_any_element()
                     }
@@ -2357,12 +2402,12 @@ impl Render for Explorer {
             .px_2()
             .py_0p5()
             .rounded_sm()
-            .bg(theme::c(theme::SEL))
+            .bg(theme::sel())
             .text_size(px(10.0))
             .text_color(if self.search_mode == SearchMode::Content {
-                theme::c(theme::ACCENT_BAR)
+                theme::accent_bar()
             } else {
-                theme::c(theme::SUBTEXT)
+                theme::subtext()
             })
             .child(SharedString::from(match self.search_mode {
                 SearchMode::Filename => "FILES",
@@ -2376,17 +2421,17 @@ impl Render for Explorer {
             .gap_3()
             .px_4()
             .py_3()
-            .bg(theme::t(theme::SURFACE_ALT))
+            .bg(theme::surface_alt())
             .border_b_1()
             .border_color(if self.search_mode == SearchMode::Content {
-                theme::c(theme::ACCENT_BAR)
+                theme::accent_bar()
             } else {
-                theme::c(theme::BORDER)
+                theme::border()
             })
             .child(mode_badge)
             .child(
                 div()
-                    .text_color(theme::c(theme::ACCENT))
+                    .text_color(theme::accent())
                     .text_size(px(16.0))
                     .child(SharedString::from(icon_glyph.to_string())),
             )
@@ -2395,9 +2440,9 @@ impl Render for Explorer {
                     .flex_grow()
                     .text_size(px(16.0))
                     .text_color(if self.query.is_empty() {
-                        theme::c(theme::MUTED)
+                        theme::muted()
                     } else {
-                        theme::c(theme::TEXT)
+                        theme::text()
                     })
                     .child(SharedString::from(if self.query.is_empty() {
                         placeholder.to_string()
@@ -2408,7 +2453,7 @@ impl Render for Explorer {
             .child(
                 div()
                     .text_size(px(12.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child(SharedString::from(counter)),
             );
 
@@ -2420,7 +2465,7 @@ impl Render for Explorer {
             .flex_col()
             .flex_grow()
             .overflow_hidden()
-            .bg(theme::t(theme::SURFACE))
+            .bg(theme::surface())
             .child(if empty {
                 div()
                     .flex()
@@ -2432,13 +2477,13 @@ impl Render for Explorer {
                     .child(
                         div()
                             .text_size(px(40.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(""),
                     )
                     .child(
                         div()
                             .text_size(px(13.0))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .text_color(theme::subtext())
                             .child(if self.query.is_empty() {
                                 "Indexing files…".to_string()
                             } else {
@@ -2448,7 +2493,7 @@ impl Render for Explorer {
                     .child(
                         div()
                             .text_size(px(11.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(if self.query.is_empty() {
                                 "If this stays empty, try ⌘H to show hidden files."
                             } else {
@@ -2494,9 +2539,9 @@ impl Render for Explorer {
             };
             let icon = file_icon(e.is_dir, &name);
             let icon_color = if e.is_dir {
-                theme::c(theme::DIR)
+                theme::dir()
             } else {
-                theme::c(theme::ACCENT)
+                theme::accent()
             };
             (name, size_s, modified_s, kind_s, icon, icon_color, e.path.clone())
         });
@@ -2507,9 +2552,9 @@ impl Render for Explorer {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme::t(theme::SURFACE_ALT))
+            .bg(theme::surface_alt())
             .border_l_1()
-            .border_color(theme::c(theme::BORDER))
+            .border_color(theme::border())
             .p_5()
             .overflow_hidden()
             .child(if let Some((name, size, modified, kind, icon, icon_color, path)) = preview {
@@ -2537,13 +2582,13 @@ impl Render for Explorer {
                                     .child(
                                         div()
                                             .text_size(px(14.0))
-                                            .text_color(theme::c(theme::TEXT))
+                                            .text_color(theme::text())
                                             .child(SharedString::from(name)),
                                     )
                                     .child(
                                         div()
                                             .text_size(px(10.0))
-                                            .text_color(theme::c(theme::MUTED))
+                                            .text_color(theme::muted())
                                             .child(SharedString::from(kind.clone())),
                                     ),
                             ),
@@ -2552,7 +2597,7 @@ impl Render for Explorer {
                         div()
                             .pt_2()
                             .border_t_1()
-                            .border_color(theme::c(theme::BORDER))
+                            .border_color(theme::border())
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -2568,14 +2613,14 @@ impl Render for Explorer {
                             .mt_2()
                             .pt_3()
                             .border_t_1()
-                            .border_color(theme::c(theme::BORDER))
+                            .border_color(theme::border())
                             .flex()
                             .flex_col()
                             .gap_1()
                             .child(
                                 div()
                                     .text_size(px(10.0))
-                                    .text_color(theme::c(theme::MUTED))
+                                    .text_color(theme::muted())
                                     .child("PREVIEW"),
                             )
                             .child(body),
@@ -2584,7 +2629,7 @@ impl Render for Explorer {
             } else {
                 div()
                     .text_size(px(12.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("No selection")
                     .into_any_element()
             });
@@ -2648,8 +2693,8 @@ impl Render for Explorer {
             .key_context("Explorer")
             .relative()
             .size_full()
-            .bg(theme::t(theme::WINDOW_BG))
-            .text_color(theme::c(theme::TEXT))
+            .bg(theme::window_bg())
+            .text_color(theme::text())
             .font_family(".SystemUIFont")
             .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _, cx| {
                 let m = &ev.keystroke.modifiers;
@@ -2889,13 +2934,13 @@ impl Explorer {
                 .px_3()
                 .py_1p5()
                 .text_size(px(12.0))
-                .text_color(theme::c(theme::TEXT))
-                .hover(|s| s.bg(theme::c(theme::SEL)))
+                .text_color(theme::text())
+                .hover(|s| s.bg(theme::sel()))
                 .cursor_pointer()
                 .child(
                     div()
                         .w(px(14.0))
-                        .text_color(theme::c(theme::ACCENT))
+                        .text_color(theme::accent())
                         .child(SharedString::from(icon.to_string())),
                 )
                 .child(
@@ -2906,7 +2951,7 @@ impl Explorer {
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .text_color(theme::c(theme::MUTED))
+                        .text_color(theme::muted())
                         .child(SharedString::from(accel.to_string())),
                 )
                 .child(on_click)
@@ -2924,8 +2969,8 @@ impl Explorer {
             .px_3()
             .py_1p5()
             .text_size(px(12.0))
-            .text_color(theme::c(theme::TEXT))
-            .hover(|s| s.bg(theme::c(theme::SEL)))
+            .text_color(theme::text())
+            .hover(|s| s.bg(theme::sel()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -2941,14 +2986,14 @@ impl Explorer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_color(theme::c(theme::ACCENT))
+                    .text_color(theme::accent())
                     .child(""),
             )
             .child(div().flex_grow().child(if is_dir { "Open Folder" } else { "Open" }))
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("↵"),
             );
 
@@ -2962,8 +3007,8 @@ impl Explorer {
             .px_3()
             .py_1p5()
             .text_size(px(12.0))
-            .text_color(theme::c(theme::TEXT))
-            .hover(|s| s.bg(theme::c(theme::SEL)))
+            .text_color(theme::text())
+            .hover(|s| s.bg(theme::sel()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -2978,14 +3023,14 @@ impl Explorer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_color(theme::c(theme::ACCENT))
+                    .text_color(theme::accent())
                     .child(""),
             )
             .child(div().flex_grow().child("Reveal in Finder"))
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("⌘↵"),
             );
 
@@ -2999,8 +3044,8 @@ impl Explorer {
             .px_3()
             .py_1p5()
             .text_size(px(12.0))
-            .text_color(theme::c(theme::TEXT))
-            .hover(|s| s.bg(theme::c(theme::SEL)))
+            .text_color(theme::text())
+            .hover(|s| s.bg(theme::sel()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -3015,14 +3060,14 @@ impl Explorer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_color(theme::c(theme::ACCENT))
+                    .text_color(theme::accent())
                     .child(""),
             )
             .child(div().flex_grow().child("Quick Look"))
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("␣"),
             );
 
@@ -3036,8 +3081,8 @@ impl Explorer {
             .px_3()
             .py_1p5()
             .text_size(px(12.0))
-            .text_color(theme::c(theme::TEXT))
-            .hover(|s| s.bg(theme::c(theme::SEL)))
+            .text_color(theme::text())
+            .hover(|s| s.bg(theme::sel()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -3052,14 +3097,14 @@ impl Explorer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_color(theme::c(theme::ACCENT))
+                    .text_color(theme::accent())
                     .child(""),
             )
             .child(div().flex_grow().child("Copy Path"))
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("⌘C"),
             );
 
@@ -3072,8 +3117,8 @@ impl Explorer {
             .px_3()
             .py_1p5()
             .text_size(px(12.0))
-            .text_color(theme::c(theme::TEXT))
-            .hover(|s| s.bg(theme::c(theme::SEL)))
+            .text_color(theme::text())
+            .hover(|s| s.bg(theme::sel()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -3085,14 +3130,14 @@ impl Explorer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_color(theme::c(theme::ACCENT))
+                    .text_color(theme::accent())
                     .child(""),
             )
             .child(div().flex_grow().child("Rename"))
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("F2"),
             );
 
@@ -3105,8 +3150,8 @@ impl Explorer {
             .px_3()
             .py_1p5()
             .text_size(px(12.0))
-            .text_color(theme::c(0xf38ba8))
-            .hover(|s| s.bg(theme::c(theme::SEL)))
+            .text_color(theme::danger())
+            .hover(|s| s.bg(theme::sel()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -3118,14 +3163,14 @@ impl Explorer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_color(theme::c(0xf38ba8))
+                    .text_color(theme::danger())
                     .child(""),
             )
             .child(div().flex_grow().child("Move to Trash"))
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("⌘⌫"),
             );
 
@@ -3135,9 +3180,9 @@ impl Explorer {
             .w(px(240.0))
             .flex()
             .flex_col()
-            .bg(theme::c(0x1e1e2e))
+            .bg(theme::panel())
             .border_1()
-            .border_color(theme::c(theme::BORDER))
+            .border_color(theme::border())
             .rounded_md()
             .py_1()
             .child(row_open)
@@ -3147,7 +3192,7 @@ impl Explorer {
                 div()
                     .my_1()
                     .h(px(1.0))
-                    .bg(theme::c(theme::BORDER)),
+                    .bg(theme::border()),
             )
             .child(row_copy)
             .child(row_rename)
@@ -3155,7 +3200,7 @@ impl Explorer {
                 div()
                     .my_1()
                     .h(px(1.0))
-                    .bg(theme::c(theme::BORDER)),
+                    .bg(theme::border()),
             )
             .child(row_trash);
 
@@ -3196,21 +3241,21 @@ impl Explorer {
             .flex()
             .flex_col()
             .gap_2()
-            .bg(theme::c(0x1e1e2e))
+            .bg(theme::panel())
             .border_1()
-            .border_color(theme::c(theme::ACCENT_BAR))
+            .border_color(theme::accent_bar())
             .rounded_lg()
             .p_5()
             .child(
                 div()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child(SharedString::from(title.to_string())),
             )
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::SUBTEXT))
+                    .text_color(theme::subtext())
                     .child(SharedString::from(format!(
                         "in {}",
                         short_path(&parent.to_string_lossy())
@@ -3224,8 +3269,8 @@ impl Explorer {
                         &self.create_input,
                         self.create_cursor,
                         self.create_anchor,
-                        theme::c(theme::TEXT),
-                        theme::c(theme::ACCENT_BAR),
+                        theme::text(),
+                        theme::accent_bar(),
                         self.caret_on,
                     )),
             )
@@ -3237,14 +3282,14 @@ impl Explorer {
                     .items_center()
                     .gap_2()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("Press")
                     .child(
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("↵"),
                     )
                     .child("to create,")
@@ -3252,8 +3297,8 @@ impl Explorer {
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("esc"),
                     )
                     .child("to cancel"),
@@ -3304,18 +3349,18 @@ impl Explorer {
                             .child(
                                 div()
                                     .flex_grow()
-                                    .text_color(theme::c(theme::MUTED))
+                                    .text_color(theme::muted())
                                     .child(SharedString::from(name)),
                             )
                             .child(
                                 div()
-                                    .text_color(theme::c(theme::MUTED))
+                                    .text_color(theme::muted())
                                     .child("→"),
                             )
                             .child(
                                 div()
                                     .flex_grow()
-                                    .text_color(theme::c(theme::TEXT))
+                                    .text_color(theme::text())
                                     .child(SharedString::from(new)),
                             )
                             .into_any_element(),
@@ -3331,15 +3376,15 @@ impl Explorer {
             .flex()
             .flex_col()
             .gap_3()
-            .bg(theme::c(0x1e1e2e))
+            .bg(theme::panel())
             .border_1()
-            .border_color(theme::c(theme::ACCENT_BAR))
+            .border_color(theme::accent_bar())
             .rounded_lg()
             .p_5()
             .child(
                 div()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child(SharedString::from(format!(
                         "BATCH RENAME · {} item{}",
                         n,
@@ -3349,7 +3394,7 @@ impl Explorer {
             .child(
                 div()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::SUBTEXT))
+                    .text_color(theme::subtext())
                     .child("Replace pattern as find/replace (e.g. img/photo):"),
             )
             .child(
@@ -3360,8 +3405,8 @@ impl Explorer {
                         &self.batch_input,
                         self.batch_cursor,
                         self.batch_anchor,
-                        theme::c(theme::TEXT),
-                        theme::c(theme::ACCENT_BAR),
+                        theme::text(),
+                        theme::accent_bar(),
                         self.caret_on,
                     )),
             )
@@ -3369,14 +3414,14 @@ impl Explorer {
                 div()
                     .pt_2()
                     .border_t_1()
-                    .border_color(theme::c(theme::BORDER))
+                    .border_color(theme::border())
                     .flex()
                     .flex_col()
                     .gap_1()
                     .children(if preview.is_empty() {
                         vec![div()
                             .text_size(px(11.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child("(preview will appear here)")
                             .into_any_element()]
                     } else {
@@ -3391,14 +3436,14 @@ impl Explorer {
                     .items_center()
                     .gap_2()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("Press")
                     .child(
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("↵"),
                     )
                     .child("to apply,")
@@ -3406,8 +3451,8 @@ impl Explorer {
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("esc"),
                     )
                     .child("to cancel"),
@@ -3471,13 +3516,13 @@ impl Explorer {
                         .py_0p5()
                         .pl(px(8.0 + (depth as f32) * 14.0))
                         .bg(if active || focused {
-                            theme::c(theme::SEL)
+                            theme::sel()
                         } else {
                             rgba(0x00000000)
                         })
                         .border_l_2()
                         .border_color(if focused {
-                            theme::c(theme::ACCENT_BAR)
+                            theme::accent_bar()
                         } else {
                             rgba(0x00000000)
                         })
@@ -3507,7 +3552,7 @@ impl Explorer {
                             div()
                                 .w(px(12.0))
                                 .text_size(px(9.0))
-                                .text_color(theme::c(theme::MUTED))
+                                .text_color(theme::muted())
                                 .child(SharedString::from(tri.to_string())),
                         )
                         .child(
@@ -3515,9 +3560,9 @@ impl Explorer {
                                 .w(px(14.0))
                                 .text_size(px(11.0))
                                 .text_color(if is_dir {
-                                    theme::c(theme::DIR)
+                                    theme::dir()
                                 } else {
-                                    theme::c(theme::ACCENT)
+                                    theme::accent()
                                 })
                                 .child(SharedString::from(icon.to_string())),
                         )
@@ -3526,9 +3571,9 @@ impl Explorer {
                                 .flex_grow()
                                 .text_size(px(11.0))
                                 .text_color(if active {
-                                    theme::c(theme::TEXT)
+                                    theme::text()
                                 } else {
-                                    theme::c(theme::SUBTEXT)
+                                    theme::subtext()
                                 })
                                 .child(SharedString::from(name)),
                         )
@@ -3543,18 +3588,18 @@ impl Explorer {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme::t(theme::SIDEBAR))
+            .bg(theme::sidebar())
             .border_r_1()
-            .border_color(theme::c(theme::BORDER))
+            .border_color(theme::border())
             .overflow_hidden()
             .child(
                 div()
                     .px_3()
                     .py_2()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .border_b_1()
-                    .border_color(theme::c(theme::BORDER))
+                    .border_color(theme::border())
                     .child("FILES · ⌥↑↓ nav · ⌥→ expand · ⌥↵ open"),
             )
             .child(list)
@@ -3566,15 +3611,15 @@ impl Explorer {
             .flex()
             .flex_col()
             .gap_2()
-            .bg(theme::c(0x1e1e2e))
+            .bg(theme::panel())
             .border_1()
-            .border_color(theme::c(theme::ACCENT_BAR))
+            .border_color(theme::accent_bar())
             .rounded_lg()
             .p_5()
             .child(
                 div()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("RENAME"),
             )
             .child(
@@ -3585,8 +3630,8 @@ impl Explorer {
                         &self.rename_input,
                         self.rename_cursor,
                         self.rename_anchor,
-                        theme::c(theme::TEXT),
-                        theme::c(theme::ACCENT_BAR),
+                        theme::text(),
+                        theme::accent_bar(),
                         self.caret_on,
                     )),
             )
@@ -3598,14 +3643,14 @@ impl Explorer {
                     .items_center()
                     .gap_2()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("Press")
                     .child(
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("↵"),
                     )
                     .child("to rename,")
@@ -3613,8 +3658,8 @@ impl Explorer {
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("esc"),
                     )
                     .child("to cancel"),
@@ -3665,13 +3710,13 @@ impl Explorer {
                     .py_1p5()
                     .rounded_md()
                     .bg(if is_active {
-                        theme::c(theme::SEL)
+                        theme::sel()
                     } else {
                         rgba(0x00000000)
                     })
                     .border_b_2()
                     .border_color(if is_active {
-                        theme::c(theme::ACCENT_BAR)
+                        theme::accent_bar()
                     } else {
                         rgba(0x00000000)
                     })
@@ -3685,9 +3730,9 @@ impl Explorer {
                         div()
                             .text_size(px(11.0))
                             .text_color(if is_active {
-                                theme::c(theme::ACCENT_BAR)
+                                theme::accent_bar()
                             } else {
-                                theme::c(theme::MUTED)
+                                theme::muted()
                             })
                             .child(""),
                     )
@@ -3695,9 +3740,9 @@ impl Explorer {
                         div()
                             .text_size(px(12.0))
                             .text_color(if is_active {
-                                theme::c(theme::TEXT)
+                                theme::text()
                             } else {
-                                theme::c(theme::SUBTEXT)
+                                theme::subtext()
                             })
                             .child(SharedString::from(label)),
                     )
@@ -3706,9 +3751,9 @@ impl Explorer {
                             .id(SharedString::from(format!("tab-x-{}", i)))
                             .px_1()
                             .text_size(px(10.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .hover(|s| {
-                                s.bg(rgba(0x31324488)).text_color(theme::c(theme::TEXT))
+                                s.bg(rgba(0x31324488)).text_color(theme::text())
                             })
                             .cursor_pointer()
                             .rounded_sm()
@@ -3738,8 +3783,8 @@ impl Explorer {
             .ml_1()
             .rounded_md()
             .text_size(px(14.0))
-            .text_color(theme::c(theme::MUTED))
-            .hover(|s| s.bg(rgba(0x31324488)).text_color(theme::c(theme::TEXT)))
+            .text_color(theme::muted())
+            .hover(|s| s.bg(rgba(0x31324488)).text_color(theme::text()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -3754,9 +3799,9 @@ impl Explorer {
             .gap_1()
             .px_2()
             .pt_2()
-            .bg(theme::t(theme::SURFACE_ALT))
+            .bg(theme::surface_alt())
             .border_b_1()
-            .border_color(theme::c(theme::BORDER))
+            .border_color(theme::border())
             .children(tab_chips)
             .child(plus)
     }
@@ -3773,17 +3818,17 @@ impl Explorer {
                 .py_1p5()
                 .rounded_md()
                 .bg(if active {
-                    theme::c(theme::ACCENT_BAR)
+                    theme::accent_bar()
                 } else {
-                    theme::c(theme::SEL)
+                    theme::sel()
                 })
                 .text_color(if active {
-                    theme::c(0x11111b)
+                    theme::on_accent()
                 } else {
-                    theme::c(theme::TEXT)
+                    theme::text()
                 })
                 .text_size(px(12.0))
-                .hover(|s| s.bg(theme::c(theme::ACCENT_BAR)).text_color(theme::c(0x11111b)))
+                .hover(|s| s.bg(theme::accent_bar()).text_color(theme::on_accent()))
                 .cursor_pointer()
                 .on_mouse_down(
                     MouseButton::Left,
@@ -3800,17 +3845,17 @@ impl Explorer {
                 .py_1p5()
                 .rounded_md()
                 .bg(if active {
-                    theme::c(theme::ACCENT_BAR)
+                    theme::accent_bar()
                 } else {
-                    theme::c(theme::SEL)
+                    theme::sel()
                 })
                 .text_color(if active {
-                    theme::c(0x11111b)
+                    theme::on_accent()
                 } else {
-                    theme::c(theme::TEXT)
+                    theme::text()
                 })
                 .text_size(px(12.0))
-                .hover(|s| s.bg(theme::c(theme::ACCENT_BAR)).text_color(theme::c(0x11111b)))
+                .hover(|s| s.bg(theme::accent_bar()).text_color(theme::on_accent()))
                 .cursor_pointer()
                 .on_mouse_down(
                     MouseButton::Left,
@@ -3834,7 +3879,7 @@ impl Explorer {
                 .child(
                     div()
                         .text_size(px(13.0))
-                        .text_color(theme::c(theme::SUBTEXT))
+                        .text_color(theme::subtext())
                         .child(SharedString::from(label.to_string())),
                 )
                 .child(div().flex().flex_row().gap_2().children(chips))
@@ -3844,9 +3889,9 @@ impl Explorer {
             .w(px(440.0))
             .flex()
             .flex_col()
-            .bg(theme::c(0x1e1e2e))
+            .bg(theme::panel())
             .border_1()
-            .border_color(theme::c(theme::ACCENT_BAR))
+            .border_color(theme::accent_bar())
             .rounded_lg()
             .p_6()
             .gap_2()
@@ -3858,17 +3903,17 @@ impl Explorer {
                     .justify_between()
                     .pb_2()
                     .border_b_1()
-                    .border_color(theme::c(theme::BORDER))
+                    .border_color(theme::border())
                     .child(
                         div()
                             .text_size(px(15.0))
-                            .text_color(theme::c(theme::TEXT))
+                            .text_color(theme::text())
                             .child("Settings"),
                     )
                     .child(
                         div()
                             .text_size(px(10.0))
-                            .text_color(theme::c(theme::MUTED))
+                            .text_color(theme::muted())
                             .child(SharedString::from(
                                 short_path(&settings_file_display()).to_string(),
                             )),
@@ -3894,20 +3939,20 @@ impl Explorer {
                 div()
                     .pt_3()
                     .border_t_1()
-                    .border_color(theme::c(theme::BORDER))
+                    .border_color(theme::border())
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap_2()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("Press")
                     .child(
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("esc"),
                     )
                     .child("or")
@@ -3915,8 +3960,8 @@ impl Explorer {
                         div()
                             .px_1p5()
                             .rounded_sm()
-                            .bg(theme::c(theme::SEL))
-                            .text_color(theme::c(theme::SUBTEXT))
+                            .bg(theme::sel())
+                            .text_color(theme::subtext())
                             .child("⌘,"),
                     )
                     .child("to close"),
@@ -4592,7 +4637,7 @@ fn render_filename_row(
     weak: gpui::WeakEntity<Explorer>,
 ) -> gpui::AnyElement {
     let row_bg = if selected {
-        theme::c(theme::SEL)
+        theme::sel()
     } else {
         rgba(0x00000000)
     };
@@ -4603,9 +4648,9 @@ fn render_filename_row(
         .unwrap_or_else(|| e.display.clone());
     let icon = file_icon(e.is_dir, &name);
     let icon_color = if e.is_dir {
-        theme::c(theme::DIR)
+        theme::dir()
     } else {
-        theme::c(theme::ACCENT)
+        theme::accent()
     };
     let parent_dir = e
         .display
@@ -4672,9 +4717,9 @@ fn render_filename_row(
         })
         .border_l_2()
         .border_color(if selected {
-            theme::c(theme::ACCENT_BAR)
+            theme::accent_bar()
         } else if is_marked {
-            theme::c(theme::MATCH)
+            theme::match_hi()
         } else {
             rgba(0x00000000)
         })
@@ -4739,17 +4784,17 @@ fn render_filename_row(
                     &name,
                     &name_hi_local,
                     if is_dir {
-                        theme::c(theme::DIR)
+                        theme::dir()
                     } else {
-                        theme::c(theme::TEXT)
+                        theme::text()
                     },
-                    theme::c(theme::MATCH),
+                    theme::match_hi(),
                 )),
         )
         .child(
             div()
                 .text_size(px(11.0))
-                .text_color(theme::c(theme::MUTED))
+                .text_color(theme::muted())
                 .child(SharedString::from(parent_dir)),
         )
         .child({
@@ -4763,7 +4808,7 @@ fn render_filename_row(
             div()
                 .min_w(px(56.0))
                 .text_size(px(11.0))
-                .text_color(theme::c(theme::MUTED))
+                .text_color(theme::muted())
                 .child(SharedString::from(size_text))
         })
         .into_any_element()
@@ -4779,7 +4824,7 @@ fn render_content_row(
     weak: gpui::WeakEntity<Explorer>,
 ) -> gpui::AnyElement {
     let row_bg = if selected {
-        theme::c(theme::SEL)
+        theme::sel()
     } else {
         rgba(0x00000000)
     };
@@ -4833,9 +4878,9 @@ fn render_content_row(
         })
         .border_l_2()
         .border_color(if selected {
-            theme::c(theme::ACCENT_BAR)
+            theme::accent_bar()
         } else if is_marked {
-            theme::c(theme::MATCH)
+            theme::match_hi()
         } else {
             rgba(0x00000000)
         })
@@ -4891,7 +4936,7 @@ fn render_content_row(
                 .child(
                     div()
                         .w(px(18.0))
-                        .text_color(theme::c(theme::ACCENT))
+                        .text_color(theme::accent())
                         .text_size(px(12.0))
                         .child(SharedString::from(icon.to_string())),
                 )
@@ -4899,13 +4944,13 @@ fn render_content_row(
                     div()
                         .flex_grow()
                         .text_size(px(12.0))
-                        .text_color(theme::c(theme::TEXT))
+                        .text_color(theme::text())
                         .child(SharedString::from(rel)),
                 )
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .text_color(theme::c(theme::MUTED))
+                        .text_color(theme::muted())
                         .child(SharedString::from(format!(":{}", line))),
                 ),
         )
@@ -4920,8 +4965,8 @@ fn render_content_row(
                 .children(highlight(
                     &m.text,
                     &hi_indices,
-                    theme::c(theme::SUBTEXT),
-                    theme::c(theme::MATCH),
+                    theme::subtext(),
+                    theme::match_hi(),
                 )),
         )
         .into_any_element()
@@ -5027,7 +5072,7 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .text_color(theme::c(theme::MUTED))
+                        .text_color(theme::muted())
                         .child(SharedString::from(format!(
                             "{} images in this folder",
                             images.len()
@@ -5078,9 +5123,9 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
                 div()
                     .text_size(px(11.0))
                     .text_color(if n.ends_with('/') {
-                        theme::c(theme::DIR)
+                        theme::dir()
                     } else {
-                        theme::c(theme::SUBTEXT)
+                        theme::subtext()
                     })
                     .child(SharedString::from(n))
                     .into_any_element()
@@ -5093,7 +5138,7 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
             .child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child(SharedString::from(format!("{} entries", total))),
             )
             .children(shown)
@@ -5138,7 +5183,7 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .text_color(theme::c(theme::MUTED))
+                        .text_color(theme::muted())
                         .child("Quick Look preview"),
                 )
                 .into_any_element();
@@ -5157,14 +5202,14 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
         if size == 0 {
             return div()
                 .text_size(px(11.0))
-                .text_color(theme::c(theme::MUTED))
+                .text_color(theme::muted())
                 .child("(empty file)")
                 .into_any_element();
         }
         if size > 256 * 1024 {
             return div()
                 .text_size(px(11.0))
-                .text_color(theme::c(theme::MUTED))
+                .text_color(theme::muted())
                 .child("(file too large to preview)")
                 .into_any_element();
         }
@@ -5204,7 +5249,7 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
             Err(_) => {
                 return div()
                     .text_size(px(11.0))
-                    .text_color(theme::c(theme::MUTED))
+                    .text_color(theme::muted())
                     .child("(could not read)")
                     .into_any_element();
             }
@@ -5213,7 +5258,7 @@ fn preview_body(path: &std::path::Path, is_dir: bool) -> gpui::AnyElement {
 
     div()
         .text_size(px(11.0))
-        .text_color(theme::c(theme::MUTED))
+        .text_color(theme::muted())
         .child("(binary file — press Space to Quick Look)")
         .into_any_element()
 }
@@ -5261,8 +5306,8 @@ fn footer(sort: SortMode, toast: Option<&str>) -> gpui::AnyElement {
                 .px_2()
                 .py_0p5()
                 .rounded_sm()
-                .bg(theme::c(theme::SEL))
-                .text_color(theme::c(theme::ACCENT_BAR))
+                .bg(theme::sel())
+                .text_color(theme::accent_bar())
                 .child(SharedString::from(format!("⇅ {}", sort.label()))),
         )
         .child(if let Some(msg) = toast {
@@ -5270,8 +5315,8 @@ fn footer(sort: SortMode, toast: Option<&str>) -> gpui::AnyElement {
                 .px_2()
                 .py_0p5()
                 .rounded_sm()
-                .bg(theme::c(theme::ACCENT_BAR))
-                .text_color(theme::c(0x11111b))
+                .bg(theme::accent_bar())
+                .text_color(theme::on_accent())
                 .child(SharedString::from(msg.to_string()))
                 .into_any_element()
         } else {
@@ -5285,11 +5330,11 @@ fn footer(sort: SortMode, toast: Option<&str>) -> gpui::AnyElement {
         .gap_4()
         .px_4()
         .py_2()
-        .bg(theme::t(theme::SURFACE_ALT))
+        .bg(theme::surface_alt())
         .border_t_1()
-        .border_color(theme::c(theme::BORDER))
+        .border_color(theme::border())
         .text_size(px(11.0))
-        .text_color(theme::c(theme::MUTED))
+        .text_color(theme::muted())
         .child(left)
         .child(right)
         .into_any_element()
@@ -5303,13 +5348,13 @@ fn meta_row(label: &str, value: &str) -> gpui::AnyElement {
         .child(
             div()
                 .text_size(px(11.0))
-                .text_color(theme::c(theme::MUTED))
+                .text_color(theme::muted())
                 .child(SharedString::from(label.to_string())),
         )
         .child(
             div()
                 .text_size(px(11.0))
-                .text_color(theme::c(theme::SUBTEXT))
+                .text_color(theme::subtext())
                 .child(SharedString::from(value.to_string())),
         )
         .into_any_element()
@@ -5325,13 +5370,13 @@ fn hint(key: &str, label: &str) -> gpui::AnyElement {
             div()
                 .px_1p5()
                 .rounded_sm()
-                .bg(theme::c(theme::SEL))
-                .text_color(theme::c(theme::SUBTEXT))
+                .bg(theme::sel())
+                .text_color(theme::subtext())
                 .child(SharedString::from(key.to_string())),
         )
         .child(
             div()
-                .text_color(theme::c(theme::MUTED))
+                .text_color(theme::muted())
                 .child(SharedString::from(label.to_string())),
         )
         .into_any_element()

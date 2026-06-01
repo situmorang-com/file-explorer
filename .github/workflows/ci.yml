@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer || true
+          xcrun metal --version || sudo xcodebuild -downloadComponent MetalToolchain
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Check formatting
+        run: cargo fmt --check
+        continue-on-error: true
+
+      - name: Clippy
+        run: cargo clippy --release -- -D warnings
+        continue-on-error: true

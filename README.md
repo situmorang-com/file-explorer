@@ -6,6 +6,34 @@ Designed to feel like Spotlight, Raycast, and Telescope had a kid that does what
 
 > macOS only. Linux/Windows aren't supported yet because the renderer uses Metal.
 
+## Screenshot
+
+> Add a real screenshot to `docs/screenshot.png` and uncomment the line below.
+> Until then, here's a lo-fi ASCII preview of the layout:
+
+<!-- ![file-explorer](docs/screenshot.png) -->
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 🏠 Home │ 🌿 main │ ~ › code › file-explorer                                  │
+├─────────┼────────────────────────────────────────────────────────────────────┤
+│ ▾ FILES │ [FILES] 🔍 push                                  124 / 8,432       │
+│ src     ├────────────────────────────────────────────────────────────────────┤
+│  ▸ ind… │ │ 🦀 main.rs                          src/                  4.8 KB │
+│  ▸ wat… │ │ 📝 README.md                        ./                    9.0 KB │
+│         │ │ 📁 scripts                          ./                  – items  │
+│ assets  │ │ 🦀 index.rs                         src/                  2.4 KB │
+│ scripts │ │                                                                  │
+│ docs    │ │ ───── preview ──────────────────────────────────────────────────│
+│         │ │   fn push_undo(&mut self, action: UndoAction) { … }              │
+│ LOCATI  │ │   self.undo_stack.push(action);                                  │
+│ ⌘1 Home │ │   …                                                              │
+│ ⌘2 Docs │                                                                    │
+├─────────┴────────────────────────────────────────────────────────────────────┤
+│ ↵ open  ⌘↵ reveal  ⇥ descend  ␣ quicklook  ⌘F find  ⌘Z undo  ⇅ relevance     │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Why
 
 Finder is fine for browsing, but slow when you actually know what you're looking for. `fzf` is fast but command-line only. This is the in-between: native-feeling, GPU-rendered, with `fzf`-style filtering and `ripgrep`-style content search baked in.

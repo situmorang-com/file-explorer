@@ -1,6 +1,7 @@
 use ignore::WalkBuilder;
 use nucleo::{Config, Nucleo, Utf32String};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub struct PathEntry {
@@ -11,6 +12,7 @@ pub struct PathEntry {
 
 pub struct Index {
     pub nucleo: Nucleo<Arc<PathEntry>>,
+    pub done: Arc<AtomicBool>,
 }
 
 impl Index {
@@ -21,13 +23,21 @@ impl Index {
             None,
             1, // one column: the path
         );
-        Self { nucleo }
+        Self {
+            nucleo,
+            done: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done.load(Ordering::Relaxed)
     }
 
     /// Spawn a background walker that streams entries into the matcher.
     /// `show_hidden = true` includes dot-files; `false` hides them (default Finder behavior).
     pub fn spawn_walk(&self, root: PathBuf, show_hidden: bool) {
         let injector = self.nucleo.injector();
+        let done = self.done.clone();
         std::thread::spawn(move || {
             let walker = WalkBuilder::new(&root)
                 .hidden(!show_hidden)
@@ -61,6 +71,7 @@ impl Index {
                     ignore::WalkState::Continue
                 })
             });
+            done.store(true, Ordering::Relaxed);
         });
     }
 

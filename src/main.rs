@@ -2196,6 +2196,24 @@ impl Render for Explorer {
                 )
         } else {
             let segs = clickable_breadcrumb(&self.root);
+            let branch = git_branch_for(&self.root);
+            let branch_chip: Option<gpui::AnyElement> = branch.map(|b| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .px_2()
+                    .py_0p5()
+                    .mr_2()
+                    .rounded_sm()
+                    .bg(theme::c(theme::SEL))
+                    .text_size(px(11.0))
+                    .text_color(theme::c(theme::DIR))
+                    .child("🌿")
+                    .child(SharedString::from(b))
+                    .into_any_element()
+            });
             div()
                 .flex()
                 .flex_row()
@@ -2207,6 +2225,7 @@ impl Render for Explorer {
                 .border_b_1()
                 .border_color(theme::c(theme::BORDER))
                 .text_size(px(12.0))
+                .children(branch_chip)
                 .children(segs.into_iter().enumerate().map(|(i, (label, path))| {
                     if let Some(path) = path {
                         div()
@@ -2237,15 +2256,15 @@ impl Render for Explorer {
 
         // ─── Search input ───────────────────────────────────────────────
         let (icon_glyph, placeholder, counter) = match self.search_mode {
-            SearchMode::Filename => (
-                "",
-                "Search filenames…",
-                format!(
-                    "{} / {}",
-                    self.results.len(),
-                    self.index.nucleo.snapshot().item_count()
-                ),
-            ),
+            SearchMode::Filename => {
+                let total_seen = self.index.nucleo.snapshot().item_count();
+                let suffix = if self.index.is_done() { "" } else { " · scanning…" };
+                (
+                    "",
+                    "Search filenames…",
+                    format!("{} / {}{}", self.results.len(), total_seen, suffix),
+                )
+            }
             SearchMode::Content => {
                 let n = self.content.as_ref().map(|c| c.matches.len()).unwrap_or(0);
                 let done = self.content.as_ref().map(|c| c.done).unwrap_or(false);
@@ -4125,6 +4144,26 @@ fn render_text_with_caret(
     }
 }
 
+/// Best-effort: return the current branch by reading `.git/HEAD` if any
+/// ancestor of `root` is a git repository.
+fn git_branch_for(root: &std::path::Path) -> Option<String> {
+    let mut cur = root.to_path_buf();
+    loop {
+        let head = cur.join(".git/HEAD");
+        if let Ok(body) = std::fs::read_to_string(&head) {
+            let body = body.trim();
+            if let Some(ref_path) = body.strip_prefix("ref: refs/heads/") {
+                return Some(ref_path.to_string());
+            }
+            // Detached HEAD: short SHA
+            return Some(body.chars().take(7).collect());
+        }
+        if !cur.pop() {
+            return None;
+        }
+    }
+}
+
 fn open_at_line(path: &std::path::Path, line: u64) {
     for editor in &["cursor", "code"] {
         let res = std::process::Command::new(editor)
@@ -4605,6 +4644,20 @@ fn render_filename_row(
                 .text_color(theme::c(theme::MUTED))
                 .child(SharedString::from(parent_dir)),
         )
+        .child({
+            let size_text = if is_dir {
+                "—".to_string()
+            } else {
+                std::fs::metadata(&e.path)
+                    .map(|m| human_size(m.len()))
+                    .unwrap_or_else(|_| "—".into())
+            };
+            div()
+                .min_w(px(56.0))
+                .text_size(px(11.0))
+                .text_color(theme::c(theme::MUTED))
+                .child(SharedString::from(size_text))
+        })
         .into_any_element()
 }
 

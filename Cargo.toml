@@ -1,0 +1,36 @@
+[package]
+name = "file-explorer"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.bundle]
+name = "File Explorer"
+identifier = "com.fileexplorer.app"
+short_description = "Fast file explorer with fzf-style search"
+long_description = "Translucent, fuzzy, content-searchable file explorer for macOS built in Rust with GPUI."
+category = "public.app-category.utilities"
+osx_minimum_system_version = "11.0"
+# Add an icon at assets/icon.icns to bundle one:
+# icon = ["assets/icon.icns"]
+
+[dependencies]
+anyhow = "1"
+crossbeam-channel = "0.5"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+nucleo = "0.5"
+notify = "7"
+parking_lot = "0.12"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
+once_cell = "1"
+gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", branch = "main", features = ["font-kit"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

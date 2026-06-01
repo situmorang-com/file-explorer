@@ -376,6 +376,8 @@ struct Explorer {
     menu: Option<MenuState>,
     tree: Option<TreeNode>,
     tree_visible: bool,
+    tree_idx: usize,
+    tree_scroll: UniformListScrollHandle,
     undo_stack: Vec<UndoAction>,
     caret_on: bool,
     scroll_handle: UniformListScrollHandle,
@@ -519,6 +521,8 @@ impl Explorer {
                 Some(t)
             },
             tree_visible: false,
+            tree_idx: 0,
+            tree_scroll: UniformListScrollHandle::new(),
             undo_stack: load_undo(),
             caret_on: true,
             scroll_handle: UniformListScrollHandle::new(),
@@ -1127,6 +1131,79 @@ impl Explorer {
         if let Some(t) = self.tree.as_mut() {
             t.toggle_at(p);
             cx.notify();
+        }
+    }
+
+    fn tree_flat(&self) -> Vec<(usize, PathBuf, bool, bool)> {
+        let mut out = Vec::new();
+        if let Some(t) = self.tree.as_ref() {
+            flatten_tree(t, 0, &mut out);
+        }
+        out
+    }
+
+    fn tree_move(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let flat = self.tree_flat();
+        if flat.is_empty() {
+            return;
+        }
+        let n = flat.len() as i32;
+        let new = (self.tree_idx as i32 + delta).clamp(0, n - 1) as usize;
+        if new != self.tree_idx {
+            self.tree_idx = new;
+            self.tree_scroll
+                .scroll_to_item(self.tree_idx, ScrollStrategy::Nearest);
+            cx.notify();
+        }
+    }
+
+    fn tree_activate(&mut self, expand_if_collapsed: bool, cx: &mut Context<Self>) {
+        let flat = self.tree_flat();
+        let Some((_, path, is_dir, expanded)) = flat.get(self.tree_idx).cloned() else {
+            return;
+        };
+        if is_dir {
+            if expand_if_collapsed && !expanded {
+                self.tree_toggle_at(&path, cx);
+            } else {
+                self.rewalk(path, cx);
+            }
+        } else {
+            let _ = std::process::Command::new("open").arg(&path).spawn();
+        }
+    }
+
+    fn tree_collapse_or_parent(&mut self, cx: &mut Context<Self>) {
+        let flat = self.tree_flat();
+        let Some((depth, path, is_dir, expanded)) = flat.get(self.tree_idx).cloned() else {
+            return;
+        };
+        if is_dir && expanded {
+            self.tree_toggle_at(&path, cx);
+            return;
+        }
+        // Jump to parent in the flat list.
+        for i in (0..self.tree_idx).rev() {
+            if flat[i].0 < depth {
+                self.tree_idx = i;
+                self.tree_scroll
+                    .scroll_to_item(i, ScrollStrategy::Nearest);
+                cx.notify();
+                return;
+            }
+        }
+    }
+
+    fn tree_expand_or_descend(&mut self, cx: &mut Context<Self>) {
+        let flat = self.tree_flat();
+        let Some((_, path, is_dir, expanded)) = flat.get(self.tree_idx).cloned() else {
+            return;
+        };
+        if is_dir && !expanded {
+            self.tree_toggle_at(&path, cx);
+        } else if is_dir {
+            // Move into first child.
+            self.tree_move(1, cx);
         }
     }
 
@@ -2671,6 +2748,18 @@ impl Render for Explorer {
                     return;
                 }
 
+                // Tree navigation with Alt+arrows (when tree pane is visible).
+                if this.tree_visible && m.alt {
+                    match key {
+                        "down" => { this.tree_move(1, cx); return; }
+                        "up" => { this.tree_move(-1, cx); return; }
+                        "right" => { this.tree_expand_or_descend(cx); return; }
+                        "left" => { this.tree_collapse_or_parent(cx); return; }
+                        "enter" => { this.tree_activate(false, cx); return; }
+                        _ => {}
+                    }
+                }
+
                 // F2 starts inline rename. ⌘F2 = batch rename of marked.
                 if key == "f2" {
                     if m.platform {
@@ -3344,91 +3433,110 @@ impl Explorer {
     }
 
     fn render_tree_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut rows: Vec<(usize, PathBuf, bool, bool)> = Vec::new();
-        if let Some(t) = self.tree.as_ref() {
-            flatten_tree(t, 0, &mut rows);
-        }
+        let flat: Vec<(usize, PathBuf, bool, bool)> = self.tree_flat();
+        let total = flat.len();
         let cur = self.root.clone();
-        let entries: Vec<gpui::AnyElement> = rows
-            .into_iter()
-            .take(500)
-            .enumerate()
-            .map(|(i, (depth, p, is_dir, expanded))| {
-                let name = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.to_string_lossy().into_owned());
-                let icon = file_icon(is_dir, &name);
-                let active = p == cur;
-                let tri = if is_dir {
-                    if expanded { "▾" } else { "▸" }
-                } else {
-                    " "
-                };
-                let p_for_toggle = p.clone();
-                let p_for_click = p.clone();
-                div()
-                    .id(SharedString::from(format!("tree-{}", i)))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_1()
-                    .pr_2()
-                    .py_0p5()
-                    .pl(px(8.0 + (depth as f32) * 14.0))
-                    .bg(if active {
-                        theme::c(theme::SEL)
+        let focused_idx = self.tree_idx;
+        let weak = cx.entity().downgrade();
+        let scroll = self.tree_scroll.clone();
+        let flat_arc = std::sync::Arc::new(flat);
+
+        let list = uniform_list("tree-list", total, move |range, _w, _app| {
+            range
+                .into_iter()
+                .map(|i| {
+                    let (depth, p, is_dir, expanded) = flat_arc[i].clone();
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.to_string_lossy().into_owned());
+                    let icon = file_icon(is_dir, &name);
+                    let active = p == cur;
+                    let focused = i == focused_idx;
+                    let tri = if is_dir {
+                        if expanded { "▾" } else { "▸" }
                     } else {
-                        rgba(0x00000000)
-                    })
-                    .hover(|s| s.bg(rgba(0x31324466)))
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, ev: &gpui::MouseDownEvent, _, cx| {
-                            if is_dir && ev.click_count >= 2 {
-                                this.rewalk(p_for_click.clone(), cx);
-                            } else if is_dir {
-                                this.tree_toggle_at(&p_for_toggle, cx);
-                            } else if ev.click_count >= 2 {
-                                let _ = std::process::Command::new("open")
-                                    .arg(&p_for_click)
-                                    .spawn();
-                            }
-                        }),
-                    )
-                    .child(
-                        div()
-                            .w(px(12.0))
-                            .text_size(px(9.0))
-                            .text_color(theme::c(theme::MUTED))
-                            .child(SharedString::from(tri.to_string())),
-                    )
-                    .child(
-                        div()
-                            .w(px(14.0))
-                            .text_size(px(11.0))
-                            .text_color(if is_dir {
-                                theme::c(theme::DIR)
-                            } else {
-                                theme::c(theme::ACCENT)
-                            })
-                            .child(SharedString::from(icon.to_string())),
-                    )
-                    .child(
-                        div()
-                            .flex_grow()
-                            .text_size(px(11.0))
-                            .text_color(if active {
-                                theme::c(theme::TEXT)
-                            } else {
-                                theme::c(theme::SUBTEXT)
-                            })
-                            .child(SharedString::from(name)),
-                    )
-                    .into_any_element()
-            })
-            .collect();
+                        " "
+                    };
+                    let p_for_toggle = p.clone();
+                    let p_for_click = p.clone();
+                    let weak = weak.clone();
+                    div()
+                        .id(SharedString::from(format!("tree-{}", i)))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_1()
+                        .pr_2()
+                        .py_0p5()
+                        .pl(px(8.0 + (depth as f32) * 14.0))
+                        .bg(if active || focused {
+                            theme::c(theme::SEL)
+                        } else {
+                            rgba(0x00000000)
+                        })
+                        .border_l_2()
+                        .border_color(if focused {
+                            theme::c(theme::ACCENT_BAR)
+                        } else {
+                            rgba(0x00000000)
+                        })
+                        .hover(|s| s.bg(rgba(0x31324466)))
+                        .cursor_pointer()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            move |ev: &gpui::MouseDownEvent, _w, app| {
+                                let cc = ev.click_count;
+                                let pp_click = p_for_click.clone();
+                                let pp_toggle = p_for_toggle.clone();
+                                let _ = weak.update(app, move |this, cx| {
+                                    this.tree_idx = i;
+                                    if is_dir && cc >= 2 {
+                                        this.rewalk(pp_click, cx);
+                                    } else if is_dir {
+                                        this.tree_toggle_at(&pp_toggle, cx);
+                                    } else if cc >= 2 {
+                                        let _ = std::process::Command::new("open")
+                                            .arg(&pp_click)
+                                            .spawn();
+                                    }
+                                });
+                            },
+                        )
+                        .child(
+                            div()
+                                .w(px(12.0))
+                                .text_size(px(9.0))
+                                .text_color(theme::c(theme::MUTED))
+                                .child(SharedString::from(tri.to_string())),
+                        )
+                        .child(
+                            div()
+                                .w(px(14.0))
+                                .text_size(px(11.0))
+                                .text_color(if is_dir {
+                                    theme::c(theme::DIR)
+                                } else {
+                                    theme::c(theme::ACCENT)
+                                })
+                                .child(SharedString::from(icon.to_string())),
+                        )
+                        .child(
+                            div()
+                                .flex_grow()
+                                .text_size(px(11.0))
+                                .text_color(if active {
+                                    theme::c(theme::TEXT)
+                                } else {
+                                    theme::c(theme::SUBTEXT)
+                                })
+                                .child(SharedString::from(name)),
+                        )
+                })
+                .collect()
+        })
+        .size_full()
+        .track_scroll(&scroll);
 
         div()
             .w(px(240.0))
@@ -3447,9 +3555,9 @@ impl Explorer {
                     .text_color(theme::c(theme::MUTED))
                     .border_b_1()
                     .border_color(theme::c(theme::BORDER))
-                    .child("FILES"),
+                    .child("FILES · ⌥↑↓ nav · ⌥→ expand · ⌥↵ open"),
             )
-            .child(div().flex().flex_col().children(entries))
+            .child(list)
     }
 
     fn render_rename_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -4844,7 +4952,8 @@ fn short_path(p: &str) -> String {
 fn is_image(ext: &str) -> bool {
     matches!(
         ext,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff" | "svg"
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "heic" | "bmp" | "ico"
+            | "tif" | "tiff" | "tga" | "dds" | "hdr" | "exr" | "qoi" | "svg"
     )
 }
 
@@ -5131,6 +5240,7 @@ fn footer(sort: SortMode, toast: Option<&str>) -> gpui::AnyElement {
         .child(hint("⌘⇧N", "new folder"))
         .child(hint("⌘V", "paste here"))
         .child(hint("⌘\\", "tree"))
+        .child(hint("⌥↑↓", "tree nav"))
         .child(hint("⌘N", "new win"))
         .child(hint("⌘,", "settings"))
         .child(hint("⌘H", "hidden"))

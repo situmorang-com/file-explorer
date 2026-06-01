@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- AVIF and HEIC images now preview inline and in result rows.
+- Extended supported image set with TGA, DDS, HDR, EXR, QOI (gpui already decodes these).
+- File tree pane now uses `uniform_list` — true virtualization, native trackpad scroll.
+- Tree-pane keyboard navigation: `⌥↑/⌥↓` move, `⌥→` expand/descend, `⌥←` collapse/parent, `⌥↵` activate. The header bar inside the tree shows the bindings as a one-line reminder.
+- `scripts/screenshot.sh` — `screencapture -o -w` helper for grabbing a clean PNG of the live window into `docs/screenshot.png`.
+
 ## v0.1.0 — 2026-06-01
 
 Initial public release.

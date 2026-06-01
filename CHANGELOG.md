@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `⌘C` (Copy Path) and drag-start now write **real file references** to the
+  macOS pasteboard via `osascript`, so `⌘V` in Finder pastes the actual
+  file rather than the path text. Path text still goes to gpui's clipboard
+  for anything that wants strings.
+- Double-click inside any modal input (Rename / Create / Batch rename) now
+  selects the word at the cursor — same affordance as native Mac text fields.
+- Catppuccin Latte light theme that mirrors macOS system appearance every
+  frame. Drag the window between displays with different appearances and the
+  palette flips live.
+- `SPARKLE.md` — full integration roadmap for replacing the GitHub-Releases
+  toast check with real Sparkle silent auto-update. Code shim is ~30 lines;
+  the blockers are env (Ed25519 keypair, hosted appcast, Sparkle.framework).
 - AVIF and HEIC images now preview inline and in result rows.
 - Extended supported image set with TGA, DDS, HDR, EXR, QOI (gpui already decodes these).
 - File tree pane now uses `uniform_list` — true virtualization, native trackpad scroll.

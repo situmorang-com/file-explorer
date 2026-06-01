@@ -1,6 +1,7 @@
 mod content_search;
 mod highlight;
 mod index;
+mod pasteboard;
 mod settings;
 mod updater;
 mod watcher;
@@ -915,21 +916,28 @@ impl Explorer {
     }
 
     fn copy_path(&mut self, cx: &mut Context<Self>) {
-        let paths = self.marked_paths();
-        let payload = if !paths.is_empty() {
-            paths
-                .iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else if let Some(p) = self.current_path() {
-            p.to_string_lossy().into_owned()
-        } else {
+        let mut targets: Vec<PathBuf> = self.marked_paths();
+        if targets.is_empty() {
+            if let Some(p) = self.current_path() {
+                targets.push(p);
+            }
+        }
+        if targets.is_empty() {
             return;
-        };
+        }
+        // Put real file refs on the macOS pasteboard so ⌘V in Finder pastes
+        // the actual file. Also drop a newline-joined path string into gpui's
+        // clipboard buffer so anything that asks for text gets path text.
+        let refs: Vec<&std::path::Path> = targets.iter().map(|p| p.as_path()).collect();
+        pasteboard::write_files(&refs);
+        let payload = targets
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
         cx.write_to_clipboard(ClipboardItem::new_string(payload));
-        let n = paths.len().max(1);
-        self.flash(format!("Copied {} path{}", n, if n == 1 { "" } else { "s" }), cx);
+        let n = targets.len();
+        self.flash(format!("Copied {} file{}", n, if n == 1 { "" } else { "s" }), cx);
     }
 
     fn trash_selected(&mut self, cx: &mut Context<Self>) {
@@ -1666,6 +1674,9 @@ impl Explorer {
                         {
                             let p = path_for_drag.clone();
                             move |_, _offset, _window, cx| {
+                                // Real file ref on the pasteboard so ⌘V in
+                                // Finder actually pastes the file.
+                                pasteboard::write_files(&[p.as_path()]);
                                 cx.write_to_clipboard(ClipboardItem::new_string(
                                     p.to_string_lossy().into_owned(),
                                 ));
@@ -3318,7 +3329,17 @@ impl Explorer {
             .child(
                 div()
                     .id("create-panel")
-                    .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, ev: &gpui::MouseDownEvent, _w, cx| {
+                            if ev.click_count >= 2 {
+                                let (a, b) = select_word_at(&this.create_input, this.create_cursor);
+                                this.create_anchor = Some(a);
+                                this.create_cursor = b;
+                                cx.notify();
+                            }
+                        }),
+                    )
                     .child(panel),
             )
     }
@@ -3472,7 +3493,17 @@ impl Explorer {
             .child(
                 div()
                     .id("batch-rename-panel")
-                    .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, ev: &gpui::MouseDownEvent, _w, cx| {
+                            if ev.click_count >= 2 {
+                                let (a, b) = select_word_at(&this.batch_input, this.batch_cursor);
+                                this.batch_anchor = Some(a);
+                                this.batch_cursor = b;
+                                cx.notify();
+                            }
+                        }),
+                    )
                     .child(panel),
             )
     }
@@ -3679,7 +3710,18 @@ impl Explorer {
             .child(
                 div()
                     .id("rename-panel")
-                    .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, ev: &gpui::MouseDownEvent, _w, cx| {
+                            if ev.click_count >= 2 {
+                                let (a, b) =
+                                    select_word_at(&this.rename_input, this.rename_cursor);
+                                this.rename_anchor = Some(a);
+                                this.rename_cursor = b;
+                                cx.notify();
+                            }
+                        }),
+                    )
                     .child(panel),
             )
     }
@@ -4036,6 +4078,29 @@ fn next_word(s: &str, idx: usize) -> usize {
         i += 1;
     }
     i
+}
+
+/// Expand the cursor to the surrounding "word" (run of non-whitespace).
+fn select_word_at(text: &str, cursor: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let cursor = cursor.min(len);
+    let mut start = cursor;
+    while start > 0 && !bytes[start - 1].is_ascii_whitespace() {
+        start -= 1;
+    }
+    let mut end = cursor;
+    while end < len && !bytes[end].is_ascii_whitespace() {
+        end += 1;
+    }
+    // Snap to char boundaries.
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    while end < len && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    (start, end)
 }
 
 fn selection_range(cursor: usize, anchor: Option<usize>) -> Option<(usize, usize)> {

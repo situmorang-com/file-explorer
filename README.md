@@ -54,6 +54,20 @@ Finder is fine for browsing, but slow when you actually know what you're looking
 
 ## Install
 
+### Pre-built `.app` (recommended)
+
+Each release at [github.com/situmorang-com/file-explorer/releases](https://github.com/situmorang-com/file-explorer/releases) ships a `file-explorer-vX.Y.Z-macos.zip` with the bundled `File Explorer.app`. Download, unzip, drag into `/Applications`.
+
+### Homebrew (after a tap is set up)
+
+Once you create your tap repo (see [homebrew/file-explorer.rb](homebrew/file-explorer.rb) for a starter formula):
+
+```bash
+brew install situmorang-com/tap/file-explorer
+```
+
+### From source
+
 You'll need Rust (1.91+), Xcode (full app, not just Command Line Tools), and the Metal toolchain:
 
 ```bash

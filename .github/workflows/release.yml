@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode + Metal toolchain
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer || true
+          xcrun metal --version || sudo xcodebuild -downloadComponent MetalToolchain
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
+
+      - name: Bundle .app
+        run: cargo bundle --release
+
+      - name: Package artifacts
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          STAGE="dist/file-explorer-${VERSION}"
+          mkdir -p "$STAGE"
+          # Bundled .app
+          cp -R "target/release/bundle/osx/File Explorer.app" "$STAGE/"
+          # Raw binary for Homebrew installs (cargo install path)
+          cp target/release/file-explorer "$STAGE/file-explorer"
+          # Source tarball for Homebrew (Cargo install needs the workspace)
+          tar -czf "dist/file-explorer-${VERSION}-src.tar.gz" \
+            --exclude=target --exclude=.git \
+            Cargo.toml Cargo.lock 2>/dev/null || true
+          # Final distributable
+          ( cd dist && zip -r "file-explorer-${VERSION}-macos.zip" "file-explorer-${VERSION}" )
+          ls -la dist/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/file-explorer-*-macos.zip
+            dist/file-explorer-*-src.tar.gz
